@@ -516,6 +516,7 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
     <div class="lib-controls-row">
       <button id="libSortBtn" class="lib-sort-btn" onclick="toggleLibGroupCat()" title="řadit dle kategorie">dle kat.</button>
       <select id="libSellerFilter" class="lib-seller-filter" onchange="renderLibrary()" title="filtrovat dle prodejce"></select>
+      <select id="libLocationFilter" class="lib-seller-filter" onchange="renderLibrary()" title="filtrovat dle místa"></select>
     </div>
     <div id="libList"></div>
     <div class="lib-io" style="margin-top:.45rem;padding-top:.45rem;border-top:var(--b)">
@@ -798,9 +799,13 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
           <option value="ostatní">ostatní</option>
         </select>
       </div>
-      <div class="field" style="grid-column:1/-1">
+      <div class="field">
         <label>prodejce</label>
         <input type="text" id="teaSeller" placeholder="Pu-erh shop, čajovna…" />
+      </div>
+      <div class="field">
+        <label>místo</label>
+        <input type="text" id="teaLocation" placeholder="doma, práce…" />
       </div>
       <div class="field">
         <label>množství</label>
@@ -1091,7 +1096,7 @@ function isDirty(){
 
 function getSessionData(){
   return{
-    teaName:el('teaName').value,teaCategory:el('teaCategory').value,seller:el('teaSeller').value,teaAmount:el('teaAmount').value,teaAmountTsp:el('teaAmountTsp').value,vesselMl:el('vesselMl').value,vesselType:el('vesselType').value,
+    teaName:el('teaName').value,teaCategory:el('teaCategory').value,seller:el('teaSeller').value,location:el('teaLocation').value,teaAmount:el('teaAmount').value,teaAmountTsp:el('teaAmountTsp').value,vesselMl:el('vesselMl').value,vesselType:el('vesselType').value,
     temp:el('tempRange').value,notes:el('notes').value,
     checks:{
       chkWarm:el('chkWarm').classList.contains('checked'),
@@ -1106,7 +1111,7 @@ function getSessionData(){
 
 function applySessionData(st){
   if(!st)return;
-  el('teaName').value=st.teaName||'';el('teaCategory').value=normCat(st.teaCategory);el('teaSeller').value=st.seller||'';if(st.vesselMl!==undefined)el('vesselMl').value=st.vesselMl||50;el('vesselType').value=st.vesselType||'gaiwan';updatePer100();
+  el('teaName').value=st.teaName||'';el('teaCategory').value=normCat(st.teaCategory);el('teaSeller').value=st.seller||'';el('teaLocation').value=st.location||'';if(st.vesselMl!==undefined)el('vesselMl').value=st.vesselMl||50;el('vesselType').value=st.vesselType||'gaiwan';updatePer100();
   el('teaAmount').value=normDec(st.teaAmount);
   el('teaAmountTsp').value=normDec(st.teaAmountTsp);
   if(st.temp)el('tempRange').value=st.temp;
@@ -1135,7 +1140,7 @@ function saveArchive(){try{localStorage.setItem(ARCHIVE_KEY,JSON.stringify(archi
 function entryData(){
   const d=getSessionData();
   const activeEntry=library.find(e=>e.id===activeLibId);
-  return{teaName:d.teaName,teaCategory:d.teaCategory,seller:d.seller,teaAmount:d.teaAmount,teaAmountTsp:d.teaAmountTsp,vesselType:d.vesselType,vesselMl:d.vesselMl,temp:d.temp,notes:d.notes,checks:d.checks,rinseSec:d.rinseSec,rinseTemp:d.rinseTemp,steeps:d.steeps.map(s=>({sec:s.sec,temp:s.temp}))};
+  return{teaName:d.teaName,teaCategory:d.teaCategory,seller:d.seller,location:d.location,teaAmount:d.teaAmount,teaAmountTsp:d.teaAmountTsp,vesselType:d.vesselType,vesselMl:d.vesselMl,temp:d.temp,notes:d.notes,checks:d.checks,rinseSec:d.rinseSec,rinseTemp:d.rinseTemp,steeps:d.steeps.map(s=>({sec:s.sec,temp:s.temp}))};
 }
 
 function saveToLibrary(){
@@ -1342,14 +1347,20 @@ function initLibLongPress(){
     if(_lpFired){e.preventDefault();e.stopPropagation();_lpFired=false;}
   },true);
 }
-function updateSellerFilter(){
-  const sel=el('libSellerFilter');if(!sel)return;
-  const sellers=[...new Set(library.map(e=>e.data?.seller||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'cs'));
+function updateDynamicFilter(selId,dataKey,placeholder,multi=false){
+  const sel=el(selId);if(!sel)return;
+  const vals=multi
+    ?[...new Set(library.flatMap(e=>(e.data?.[dataKey]||'').split(',').map(s=>s.trim()).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,'cs'))
+    :[...new Set(library.map(e=>e.data?.[dataKey]||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'cs'));
   const cur=sel.value;
-  sel.innerHTML='<option value="">— prodejce</option>'+sellers.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  if(sellers.includes(cur))sel.value=cur;else sel.value='';
-  sel.classList.toggle('has-options',sellers.length>0);
+  sel.innerHTML=`<option value="">— ${placeholder}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(vals.includes(cur))sel.value=cur;else sel.value='';
+  sel.classList.toggle('has-options',vals.length>0);
   sel.classList.toggle('active',!!sel.value);
+}
+function updateSellerFilter(){
+  updateDynamicFilter('libSellerFilter','seller','prodejce',true);
+  updateDynamicFilter('libLocationFilter','location','místo',true);
 }
 function renderLibrary(){
   const list=el('libList');
@@ -1357,8 +1368,12 @@ function renderLibrary(){
   if(btn)btn.classList.toggle('active',libGroupByCat);
   updateSellerFilter();
   const sellerFilter=(el('libSellerFilter')?.value||'');
-  const items=sellerFilter?library.filter(e=>(e.data?.seller||'')===sellerFilter):library;
-  if(!items.length){list.innerHTML='<div class="lib-empty">'+(sellerFilter?'Žádné čaje od tohoto prodejce.':'Zatím žádné čaje.')+'</div>';}
+  const locationFilter=(el('libLocationFilter')?.value||'');
+  const items=library.filter(e=>
+    (!sellerFilter||(e.data?.seller||'').split(',').map(s=>s.trim()).includes(sellerFilter))&&
+    (!locationFilter||(e.data?.location||'').split(',').map(s=>s.trim()).includes(locationFilter))
+  );
+  if(!items.length){list.innerHTML='<div class="lib-empty">'+(sellerFilter||locationFilter?'Žádné čaje odpovídají filtru.':'Zatím žádné čaje.')+'</div>';}
   else if(!libGroupByCat){
     list.innerHTML=items.map(libItemHtml).join('');
   }else{
@@ -1535,7 +1550,7 @@ async function newSession(){
   if(!await customConfirm('Otevřít prázdnou kartu? Neuložené změny budou ztraceny.','otevřít'))return;
   clearAllTimers();
   steeps=[];nextId=1;activeLibId=null;
-  el('teaName').value='';el('teaCategory').value='';el('teaSeller').value='';el('teaAmount').value='';el('teaAmountTsp').value='';
+  el('teaName').value='';el('teaCategory').value='';el('teaSeller').value='';el('teaLocation').value='';el('teaAmount').value='';el('teaAmountTsp').value='';
   el('vesselMl').value='50';el('vesselType').value='gaiwan';
   el('tempRange').value='80';
   el('notes').value='';
@@ -2020,7 +2035,7 @@ function buildSettingsDiff(ed,id_data){
   const diffs=[];
   [{key:'temp',label:'teplota',fmt:v=>v+'°C'},{key:'vesselType',label:'nádoba typ'},{key:'vesselMl',label:'nádoba ml',fmt:v=>v+' ml'},
    {key:'teaAmount',label:'množství',fmt:v=>v+'g'},{key:'teaAmountTsp',label:'lžičky'},{key:'teaCategory',label:'kategorie'},
-   {key:'seller',label:'prodejce'},
+   {key:'seller',label:'prodejce'},{key:'location',label:'místo'},
    {key:'rinseSec',label:'oplach',fmt:v=>v+'s'},{key:'rinseTemp',label:'tepl. opláchu',fmt:v=>v+'°C'}
   ].forEach(f=>{
     const eV=String(ed?.[f.key]||'');const iV=String(id_data?.[f.key]||'');
@@ -2864,6 +2879,7 @@ function init(){
   ['teaName','notes'].forEach(id=>el(id).addEventListener('input',()=>{clearTimeout(_undoPushT[id]);_undoPushT[id]=setTimeout(()=>{pushUndo();},1500);schedSave();updateHeaderTeaName();renderLibrary();}));
   el('teaCategory').addEventListener('change',()=>{pushUndo();schedSave();renderLibrary();});
   el('teaSeller').addEventListener('input',()=>{clearTimeout(_undoPushT.seller);_undoPushT.seller=setTimeout(()=>pushUndo(),1500);schedSave();renderLibrary();});
+  el('teaLocation').addEventListener('input',()=>{clearTimeout(_undoPushT.location);_undoPushT.location=setTimeout(()=>pushUndo(),1500);schedSave();renderLibrary();});
   el('teaAmount').addEventListener('input',()=>{clearTimeout(_undoPushT.amt);_undoPushT.amt=setTimeout(()=>pushUndo(),1500);schedSave();updatePer100();updateMeasureRow();updateDirtyState();});
   el('teaAmountTsp').addEventListener('input',()=>{clearTimeout(_undoPushT.tsp);_undoPushT.tsp=setTimeout(()=>pushUndo(),1500);schedSave();updateMeasureRow();updateDirtyState();});
   el('vesselMl').addEventListener('input',()=>{clearTimeout(_undoPushT.vessel);_undoPushT.vessel=setTimeout(()=>pushUndo(),1500);updatePer100();renderLibrary();renderLog();});
