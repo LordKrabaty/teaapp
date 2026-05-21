@@ -1161,6 +1161,7 @@ function applySessionData(st){
   if(st.temp)el('tempRange').value=st.temp;
   el('notes').value=st.notes||'';
   if(st.checks)Object.entries(st.checks).forEach(([id,on])=>el(id).classList.toggle('checked',!!on));
+  if(!(st.checks&&'chkThermometer' in st.checks))el('chkThermometer').classList.add('checked');
   if(st.rinseSec)el('rinseSec').value=st.rinseSec;
   if(st.rinseTemp!==undefined)el('rinseTemp').value=st.rinseTemp||'';
   updateRinseVisibility();
@@ -2759,7 +2760,7 @@ function openLogEdit(logId){
   el('le-chkRinse').checked=!!ch.chkRinse;
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
-  el('le-chkThermometer').checked=!!ch.chkThermometer;
+  el('le-chkThermometer').checked='chkThermometer' in ch?!!ch.chkThermometer:true;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
   updateLeRinseRow();
@@ -2818,7 +2819,7 @@ function openTplEdit(id){
   el('le-chkRinse').checked=!!ch.chkRinse;
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
-  el('le-chkThermometer').checked=!!ch.chkThermometer;
+  el('le-chkThermometer').checked='chkThermometer' in ch?!!ch.chkThermometer:true;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
   updateLeRinseRow();
