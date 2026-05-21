@@ -3039,6 +3039,7 @@ function init(){
   el('rinseTemp').addEventListener('change',()=>{pushUndo();renderSteeps();schedSave();renderLibrary();});
 }
 init();
+if(window.checkCloudOnStartup) window.checkCloudOnStartup();
 window.addEventListener('resize',updateAppGrid);
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.key==='z'&&e.shiftKey))){
@@ -3266,10 +3267,45 @@ document.addEventListener('keydown',e=>{
     }finally{btn.disabled=false;}
   }
 
+  async function checkCloudOnStartup(){
+    const binId=localStorage.getItem(JBID);
+    if(!binId) return;
+    if(sessionStorage.getItem('cajovy-cloud-checked')) return;
+    sessionStorage.setItem('cajovy-cloud-checked','1');
+    try{
+      const key=localStorage.getItem(JBKEY);
+      const res=await jbGet(binId,key);
+      if(!res.ok) return;
+      const json=await res.json();
+      let record=json.record;
+      if(typeof record!=='object'||record===null) return;
+      if('cajovy-v3-library' in record){
+        record={
+          v:1,
+          teas:JSON.parse(record['cajovy-v3-library']||'[]'),
+          templates:JSON.parse(record['cajovy-v3-templates']||'[]'),
+          archive:JSON.parse(record['cajovy-v3-archive']||'[]')
+        };
+      }
+      const cloudTeas=record.teas||[];
+      const cloudTpls=record.templates||[];
+      const cloudArch=record.archive||[];
+      const sort=arr=>arr.slice().sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
+      const sig=arr=>JSON.stringify(sort(arr));
+      if(sig(cloudTeas)===sig(library)&&sig(cloudTpls)===sig(templates)&&sig(cloudArch)===sig(archive)) return;
+      openImportModal();
+      el('importModal').classList.add('from-cloud');
+      el('importModal').querySelector('h2').textContent='Import z JSONBin';
+      parseImportJson(JSON.stringify(record));
+      showSyncTooltip('☁ cloud má jiná data — zkontroluj výběr');
+    }catch(e){}
+  }
+
   window.openJsonBinSettings=openJsonBinSettings;
   window.saveJsonBinSettings=saveJsonBinSettings;
   window.doCloudUpload=doCloudUpload;
   window.syncDownload=syncDownload;
+  window.checkCloudOnStartup=checkCloudOnStartup;
 })();
 </script>
 </body>
