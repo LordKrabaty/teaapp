@@ -1950,15 +1950,7 @@ function parseImportJson(text){
     const existingTeaNames=new Map(library.map(x=>[x.name.trim().toLowerCase(),x.id]));
     const existingTeaById=new Map(library.map(x=>[x.id,x]));
     importData=(parsed.teas||[]).map(t=>{
-      // ID match has priority over name match
-      const idMatchLib=existingTeaById.get(t.id);
-      let _nameDup=null,_idMatchRenamed=false;
-      if(idMatchLib){
-        _nameDup=idMatchLib.id;
-        _idMatchRenamed=idMatchLib.name.trim().toLowerCase()!==t.name.trim().toLowerCase();
-      }else{
-        _nameDup=existingTeaNames.get(t.name.trim().toLowerCase())||null;
-      }
+      const {_nameDup,_idMatchRenamed}=detectTeaDuplicate(t,existingTeaById,existingTeaNames);
       const entry={...t,_nameDup,_idMatchRenamed};
       if(entry.data)entry.data={...entry.data,teaCategory:normCat(entry.data.teaCategory)};
       return entry;
@@ -2329,6 +2321,22 @@ function bulkApplySettingsToggle(){
     if(importMergeConfig[t.id]){importMergeConfig[t.id].applySettings=_bulkApplySettings;_updateMergeBtn(t.id);}
   });
 }
+function detectTeaDuplicate(t,existingTeaById,existingTeaNames){
+  const idMatchLib=existingTeaById.get(t.id);
+  let _nameDup=null,_idMatchRenamed=false;
+  if(idMatchLib){
+    _nameDup=idMatchLib.id;
+    _idMatchRenamed=idMatchLib.name.trim().toLowerCase()!==t.name.trim().toLowerCase();
+  }else{
+    _nameDup=existingTeaNames.get(t.name.trim().toLowerCase())||null;
+  }
+  return{_nameDup,_idMatchRenamed};
+}
+function genUniqueId(existingIds){
+  let id;
+  do{id=Date.now()+Math.floor(Math.random()*100000);}while(existingIds.has(id));
+  return id;
+}
 function doImport(){
   const existingIds=new Set(library.map(x=>x.id));
   const toAdd=importData.filter(t=>importSelected.has(t.id));
@@ -2358,7 +2366,7 @@ function doImport(){
       const entry={...t};
       const renamedVal=el('iact-name-'+t.id)?.value;
       if(renamedVal!==undefined)entry.name=renamedVal.trim()||t.name;
-      if(existingIds.has(entry.id)){entry.id=Date.now()+Math.floor(Math.random()*100000);}
+      if(existingIds.has(entry.id)){entry.id=genUniqueId(existingIds);}
       library.push(entry);added++;
     }
   });
@@ -2372,7 +2380,7 @@ function doImport(){
   const archToAdd=importArchData.filter(e=>importArchSelected.has(e.id));
   archToAdd.forEach(e=>{
     const entry={...e};
-    if(existingArchIds2.has(entry.id)){entry.id=Date.now()+Math.floor(Math.random()*100000);}
+    if(existingArchIds2.has(entry.id)){entry.id=genUniqueId(existingArchIds2);}
     archive.push(entry);
   });
   saveArchive();renderArchive();
@@ -3272,6 +3280,9 @@ document.addEventListener('keydown',e=>{
     if(!binId) return;
     if(sessionStorage.getItem('cajovy-cloud-checked')) return;
     sessionStorage.setItem('cajovy-cloud-checked','1');
+    const btn=el('syncDownBtn');
+    const origTitle=btn.title;
+    btn.disabled=true;btn.title='kontroluji cloud…';
     try{
       const key=localStorage.getItem(JBKEY);
       const res=await jbGet(binId,key);
@@ -3290,15 +3301,18 @@ document.addEventListener('keydown',e=>{
       const cloudTeas=record.teas||[];
       const cloudTpls=record.templates||[];
       const cloudArch=record.archive||[];
-      const sort=arr=>arr.slice().sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
-      const sig=arr=>JSON.stringify(sort(arr));
-      if(sig(cloudTeas)===sig(library)&&sig(cloudTpls)===sig(templates)&&sig(cloudArch)===sig(archive)) return;
+      const idSig=arr=>arr.map(x=>String(x.id||'')).sort().join(',')+':'+arr.length;
+      const localSig=idSig(library)+'|'+idSig(templates)+'|'+idSig(archive);
+      const cloudSig=idSig(cloudTeas)+'|'+idSig(cloudTpls)+'|'+idSig(cloudArch);
+      if(localSig===cloudSig) return;
       openImportModal();
       el('importModal').classList.add('from-cloud');
       el('importModal').querySelector('h2').textContent='Import z JSONBin';
       parseImportJson(JSON.stringify(record));
       showSyncTooltip('☁ cloud má jiná data — zkontroluj výběr');
-    }catch(e){}
+    }catch(e){}finally{
+      btn.disabled=false;btn.title=origTitle;
+    }
   }
 
   window.openJsonBinSettings=openJsonBinSettings;
