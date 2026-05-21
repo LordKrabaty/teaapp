@@ -202,6 +202,8 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:non
 .steep-row.done-row{opacity:.4}
 .steep-row.rinse-row{background:var(--off);border-style:dashed;border-color:var(--dark)}
 .steep-row.rinse-row.active{border-style:solid;border-color:var(--black)}
+.steep-row.cool-row{background:var(--off);border-style:dashed;border-color:var(--mid)}
+.steep-row.cool-row.active{border-style:solid;border-color:var(--black)}
 .progress-bar-wrap{grid-column:1/-1;height:2px;background:var(--light);overflow:hidden;display:none;margin-top:-2px}
 .progress-bar-wrap.visible{display:block}
 .progress-bar{height:100%;background:var(--black);transition:width 1s linear}
@@ -754,6 +756,7 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
           <label class="le-chk"><input type="checkbox" id="le-chkRinse" onchange="updateLeRinseRow()" /> oplach</label>
           <label class="le-chk"><input type="checkbox" id="le-chkSieve" /> sítko</label>
           <label class="le-chk"><input type="checkbox" id="le-chkCover" /> přikrýt</label>
+          <label class="le-chk"><input type="checkbox" id="le-chkThermometer" /> teploměr</label>
         </div>
       </div>
       <div id="le-rinse-row" style="display:none;gap:.35rem;align-items:center;flex-wrap:wrap">
@@ -832,9 +835,12 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
       </div>
       <div class="field">
         <label>teplota</label>
-        <div style="display:flex;align-items:center;gap:.22rem">
-          <input type="number" id="tempRange" min="40" max="100" value="80" step="5" style="max-width:70px" />
-          <span style="font-size:.8rem;color:var(--muted);font-weight:500">°C</span>
+        <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:.22rem">
+            <input type="number" id="tempRange" min="40" max="100" value="80" step="5" style="max-width:70px" />
+            <span style="font-size:.8rem;color:var(--muted);font-weight:500">°C</span>
+          </div>
+          <span id="coolGuide" style="font-size:.75rem;color:var(--muted);font-family:'DM Mono',monospace;display:none"></span>
         </div>
       </div>
     </div>
@@ -850,6 +856,9 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
       </div>
       <div class="check-item" id="chkCover" onclick="toggleCheck('chkCover')">
         <div class="check-box"><div class="check-mark"></div></div>přikrýt
+      </div>
+      <div class="check-item" id="chkThermometer" onclick="toggleCheck('chkThermometer')">
+        <div class="check-box"><div class="check-mark"></div></div>teploměr
       </div>
     </div>
     <div class="rinse-settings" id="rinseSettings">
@@ -912,6 +921,32 @@ const ARCHIVE_KEY='cajovy-v3-archive';
 let steeps=[],timers={},nextId=1;
 let warmDone=false,measureDone=false;
 let rinseTimer=null,rinseState={remaining:15,state:'idle'};
+let coolTimer=null,coolState={remaining:0,state:'idle'};
+const COOL_CURVE=[{sec:0,temp:100},{sec:60,temp:90},{sec:180,temp:85},{sec:300,temp:80},{sec:600,temp:70},{sec:900,temp:60}];
+function coolWaitSec(targetTemp){
+  const raw=parseInt(targetTemp);
+  if(isNaN(raw)||raw<=0)return null;   // neplatná teplota
+  if(raw>100)return 0;                 // ihned (nad bodem varu)
+  if(raw>=100)return 0;
+  if(raw<60)return -1;                 // pod rozsahem tabulky
+  for(let i=0;i<COOL_CURVE.length-1;i++){
+    const hi=COOL_CURVE[i],lo=COOL_CURVE[i+1];
+    if(raw<=hi.temp&&raw>=lo.temp){const frac=(hi.temp-raw)/(hi.temp-lo.temp);return Math.round(hi.sec+frac*(lo.sec-hi.sec));}
+  }
+  return 0;
+}
+function updateCoolGuide(){
+  const noTherm=!el('chkThermometer').classList.contains('checked');
+  const guide=el('coolGuide');
+  if(!guide)return;
+  if(!noTherm){guide.style.display='none';return;}
+  const sec=coolWaitSec(el('tempRange').value);
+  guide.style.display='';
+  if(sec===null){guide.textContent='⚠ neplatná teplota';guide.style.color='#c0392b';}
+  else if(sec===-1){guide.textContent='→ čekat déle než 15 min';guide.style.color='';}
+  else if(sec===0){guide.textContent='použít ihned';guide.style.color='';}
+  else{guide.textContent='→ čekat ~'+Math.round(sec/60)+' min';guide.style.color='';}
+}
 let library=[],activeLibId=null;
 let archive=[],archiveOpen=false;
 let undoStack=[],redoStack=[],savedSnapshot=null;
@@ -958,6 +993,7 @@ function updateHeaderTeaName(){
 
 function updateRinseVisibility(){
   el('rinseSettings').classList.toggle('visible',el('chkRinse').classList.contains('checked'));
+  updateCoolGuide();
 }
 function toggleCheck(id){
   pushUndo();
@@ -1103,6 +1139,7 @@ function getSessionData(){
       chkRinse:el('chkRinse').classList.contains('checked'),
       chkSieve:el('chkSieve').classList.contains('checked'),
       chkCover:el('chkCover').classList.contains('checked'),
+      chkThermometer:el('chkThermometer').classList.contains('checked'),
     },
     rinseSec:el('rinseSec').value,rinseTemp:el('rinseTemp').value,
     steeps:steeps.map(s=>({id:s.id,sec:s.sec,temp:s.temp})),nextId,
@@ -1437,6 +1474,7 @@ function renderSteeps(){
   const warmOn=el('chkWarm').classList.contains('checked');
   const sieveOn=el('chkSieve').classList.contains('checked');
   const coverOn=el('chkCover').classList.contains('checked');
+  const noTherm=!el('chkThermometer').classList.contains('checked');
   const tagsHtml=`<div class="steep-tags"><span class="${sieveOn?'steep-tag-on':'steep-tag-off'}">sítko</span><span class="steep-tag-sep"> · </span><span class="${coverOn?'steep-tag-on':'steep-tag-off'}">přikrýt</span></div>`;
   if(warmOn){
     const warmRow=document.createElement('div');
@@ -1455,6 +1493,35 @@ function renderSteeps(){
     mRow.addEventListener('click',toggleMeasureDone);
     mRow.innerHTML=`<div style="grid-column:1/-1;display:flex;align-items:center;gap:.55rem"><div class="warm-check-box"><div class="warm-check-mark"></div></div><span class="warm-label">odměřit ${amtStr||'množství'}</span></div>`;
     list.appendChild(mRow);
+  }
+  if(noTherm){
+    const csecRaw=coolWaitSec(gTemp);
+    const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;
+    if(coolState.state==='idle')coolState.remaining=csec;
+    const isDisabled=!csec;
+    const pct=(!isDisabled&&coolState.state!=='idle')?Math.round((1-coolState.remaining/csec)*100):0;
+    const timeLabel=csecRaw===null?'—':csecRaw===-1?'> 15 min':csecRaw===0?'ihned':Math.round(csecRaw/60)+' min';
+    const rowLabel=csecRaw===null?'⚠ neplatná teplota':csecRaw===-1?'čekat déle než 15 min':'ochlazení';
+    const rowColor=csecRaw===null?'color:#c0392b':'';
+    const icon=coolState.state==='running'
+      ?`<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`
+      :coolState.state==='done'
+      ?`<svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`
+      :`<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+    const coolRow=document.createElement('div');
+    coolRow.className='steep-row cool-row'+(coolState.state==='running'?' active':'')+(coolState.state==='done'?' done-row':'');
+    coolRow.innerHTML=`
+      <div class="steep-num" style="font-size:.7rem;color:var(--muted)">~°</div>
+      <div class="steep-label-wrap"><span class="steep-label" style="${rowColor}">${rowLabel}</span></div>
+      <div class="steep-time-input" style="text-align:center;font-family:'DM Mono',monospace;font-size:.82rem;color:var(--muted);border-color:transparent;background:transparent">${timeLabel}</div>
+      <div class="steep-temp-input" style="text-align:center;font-family:'DM Mono',monospace;font-size:.82rem;color:var(--muted);border-color:transparent;background:transparent">${isNaN(parseInt(gTemp))?'—':gTemp}</div>
+      <div class="timer-display ${coolState.state==='running'?'running':coolState.state==='done'?'done-time':''}" id="timer-cool">${isDisabled?'–':fmtTime(coolState.remaining)}</div>
+      <button class="btn-play ${coolState.state==='running'?'is-running':coolState.state==='done'?'is-done':''}" onclick="toggleCoolTimer()" ${isDisabled?'disabled':''}>${isDisabled?'–':icon}</button>
+      <div></div>
+      <div class="progress-bar-wrap ${coolState.state!=='idle'?'visible':''}" id="prog-wrap-cool">
+        <div class="progress-bar" id="prog-cool" style="width:${pct}%"></div>
+      </div>`;
+    list.appendChild(coolRow);
   }
   if(rinseOn){
     const rs=rinseState,rsec=parseInt(el('rinseSec').value)||15;
@@ -1526,6 +1593,22 @@ function toggleRinseTimer(){
   },1000);
 }
 
+function toggleCoolTimer(){
+  const csecRaw=coolWaitSec(el('tempRange').value);
+  const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;if(!csec)return;
+  if(coolState.state==='done'){coolState={remaining:csec,state:'idle'};if(coolTimer){clearInterval(coolTimer);coolTimer=null;}renderSteeps();return;}
+  if(coolState.state==='running'){clearInterval(coolTimer);coolTimer=null;coolState.state='paused';renderSteeps();return;}
+  coolState.state='running';renderSteeps();
+  coolTimer=setInterval(()=>{
+    coolState.remaining--;
+    const d=el('timer-cool'),p=el('prog-cool'),w=el('prog-wrap-cool');
+    if(d)d.textContent=fmtTime(coolState.remaining);
+    if(p)p.style.width=Math.round((1-coolState.remaining/csec)*100)+'%';
+    if(w)w.classList.add('visible');
+    if(coolState.remaining<=0){clearInterval(coolTimer);coolTimer=null;coolState.state='done';coolState.remaining=0;renderSteeps();playBeep();}
+  },1000);
+}
+
 function toggleTimer(id){
   const s=steeps.find(x=>x.id===id);if(!s)return;
   if(s.state==='done'){s.remaining=s.sec;s.state='idle';clearInterval(timers[id]);delete timers[id];renderSteeps();return;}
@@ -1545,7 +1628,7 @@ function updateSteepTime(id,val){pushUndo();const s=steeps.find(x=>x.id===id);if
 function updateSteepTemp(id,val){pushUndo();const s=steeps.find(x=>x.id===id);if(!s)return;s.temp=val?Math.max(40,Math.min(100,parseInt(val)||0)).toString():'';renderSteeps();schedSave();renderLibrary();}
 function updateRinseTime(val){pushUndo();const n=Math.max(3,Math.min(120,parseInt(val)||15));el('rinseSec').value=n;if(rinseState.state==='idle')rinseState.remaining=n;renderSteeps();schedSave();renderLibrary();}
 function removeSteep(id){pushUndo();clearInterval(timers[id]);delete timers[id];steeps=steeps.filter(s=>s.id!==id);renderSteeps();schedSave();renderLibrary();}
-function clearAllTimers(){Object.values(timers).forEach(t=>clearInterval(t));timers={};if(rinseTimer){clearInterval(rinseTimer);rinseTimer=null;}}
+function clearAllTimers(){Object.values(timers).forEach(t=>clearInterval(t));timers={};if(rinseTimer){clearInterval(rinseTimer);rinseTimer=null;}if(coolTimer){clearInterval(coolTimer);coolTimer=null;}}
 async function newSession(){
   if(!await customConfirm('Otevřít prázdnou kartu? Neuložené změny budou ztraceny.','otevřít'))return;
   clearAllTimers();
@@ -1555,8 +1638,9 @@ async function newSession(){
   el('tempRange').value='80';
   el('notes').value='';
   el('rinseSec').value='15';el('rinseTemp').value='';
-  ['chkWarm','chkRinse','chkSieve','chkCover'].forEach(id=>el(id).classList.remove('checked'));
+  ['chkWarm','chkRinse','chkSieve','chkCover','chkThermometer'].forEach(id=>el(id).classList.remove('checked'));
   warmDone=false;measureDone=false;
+  if(coolTimer){clearInterval(coolTimer);coolTimer=null;}coolState={remaining:0,state:'idle'};
   updateRinseVisibility();
   defaultSteeps.forEach(s=>addSteep(s,'',true));
   renderSteeps();updateHeaderTeaName();updatePer100();
@@ -2043,7 +2127,7 @@ function buildSettingsDiff(ed,id_data){
   });
   const eS=(ed?.steeps||[]).length;const iS=(id_data?.steeps||[]).length;
   if(eS!==iS)diffs.push({label:'nálevy',oldVal:eS+'×',newVal:iS+'×'});
-  const ckLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrýt'};
+  const ckLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrýt',chkThermometer:'teploměr'};
   Object.entries(ckLabels).forEach(([ck,cl])=>{
     const eV=!!(ed?.checks?.[ck]);const iV=!!(id_data?.checks?.[ck]);
     if(eV!==iV)diffs.push({label:cl,oldVal:eV?'✓':'✗',newVal:iV?'✓':'✗'});
@@ -2287,6 +2371,7 @@ function getTemplateData(){
       chkRinse:el('chkRinse').classList.contains('checked'),
       chkSieve:el('chkSieve').classList.contains('checked'),
       chkCover:el('chkCover').classList.contains('checked'),
+      chkThermometer:el('chkThermometer').classList.contains('checked'),
     },
     steeps:steeps.map(s=>{return{sec:s.sec,temp:s.temp};}),
   };
@@ -2321,6 +2406,7 @@ function openTplApplyModal(id){
   fields.push({key:'amount',label:'Množství',val:amtParts.length?amtParts.join(' / '):'—'});
   fields.push({key:'category',label:'Kategorie',val:d.teaCategory||'—'});
   const checkMap={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrýt'};
+  if(d.checks&&'chkThermometer' in d.checks)checkMap.chkThermometer='teploměr';
   if(d.checks){
     const cs=Object.entries(checkMap).map(([cid,l])=>(d.checks[cid]?'✓ ':'✗ ')+l).join('  ');
     fields.push({key:'checks',label:'Příprava',val:cs});
@@ -2538,7 +2624,7 @@ function buildSetupSnapshot(){
   const vessel=el('vesselMl').value||'50';
   const vesselType=el('vesselType').value||'gaiwan';
   const temp=el('tempRange').value;
-  const checkLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrytí'};
+  const checkLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrytí',chkThermometer:'teploměr'};
   const checkLine=Object.entries(checkLabels)
     .map(([id,l])=>(el(id).classList.contains('checked')?'✓ ':'✗ ')+l).join('  ');
   const rinseOn=el('chkRinse').classList.contains('checked');
@@ -2605,6 +2691,7 @@ function openLogEdit(logId){
   el('le-chkRinse').checked=!!ch.chkRinse;
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
+  el('le-chkThermometer').checked=!!ch.chkThermometer;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
   updateLeRinseRow();
@@ -2663,6 +2750,7 @@ function openTplEdit(id){
   el('le-chkRinse').checked=!!ch.chkRinse;
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
+  el('le-chkThermometer').checked=!!ch.chkThermometer;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
   updateLeRinseRow();
@@ -2686,7 +2774,7 @@ function saveTplEdit(){
   d.vesselMl=el('le-vml').value||'50';
   d.rinseSec=el('le-rsec').value||'15';
   d.rinseTemp=el('le-rtemp').value||'';
-  d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked};
+  d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked,chkThermometer:el('le-chkThermometer').checked};
   d.steeps=leEditSteeps.map(s=>({sec:s.sec,temp:s.temp}));
   tpl.data=d;
   editingTplId=null;
@@ -2719,6 +2807,7 @@ function buildSetupHtml(logData,curData,fallback,curTeaName){
   const line1='teplota: '+(tempDiff?`<b>${esc(temp)} °C</b>`:esc(temp)+' °C');
   const checkLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrytí'};
   const checks=logData.checks||{};const curChecks=curData.checks||{};
+  if('chkThermometer' in checks||'chkThermometer' in curChecks)checkLabels.chkThermometer='teploměr';
   const checkLine=Object.entries(checkLabels).map(([id,l])=>{
     const on=!!checks[id];const curOn=!!curChecks[id];
     const txt=(on?'✓ ':'✗ ')+l;
@@ -2748,6 +2837,7 @@ function buildSetupFromData(d,name){
   const temp=d.temp||'80';
   const checkLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrytí'};
   const checks=d.checks||{};
+  if('chkThermometer' in checks)checkLabels.chkThermometer='teploměr';
   const checkLine=Object.entries(checkLabels).map(([id,l])=>(checks[id]?'✓ ':'✗ ')+l).join('  ');
   const lines=[];
   lines.push((name||'—')+(amtStr?' · '+amtStr:'')+(vessel?' · '+vesselType+' '+vessel+' ml':''));
@@ -2770,7 +2860,7 @@ function saveLogEdit(){
   d.vesselMl=el('le-vml').value||'50';
   d.rinseSec=el('le-rsec').value||'15';
   d.rinseTemp=el('le-rtemp').value||'';
-  d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked};
+  d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked,chkThermometer:el('le-chkThermometer').checked};
   d.steeps=leEditSteeps.map(s=>({sec:s.sec,temp:s.temp}));
   e.data=d;
   const teaName=(e.setup||'').split('\n')[0].split(' · ')[0];
@@ -2873,7 +2963,7 @@ function init(){
   const restored=loadSession();
   if(!restored)defaultSteeps.forEach(s=>addSteep(s,'',true));
   if(activeLibId)markSaved();
-  renderSteeps();updateHeaderTeaName();updatePer100();
+  renderSteeps();updateHeaderTeaName();updatePer100();updateCoolGuide();
   showSave(restored?'↓ obnoveno':'');
   let _undoPushT={};
   ['teaName','notes'].forEach(id=>el(id).addEventListener('input',()=>{clearTimeout(_undoPushT[id]);_undoPushT[id]=setTimeout(()=>{pushUndo();},1500);schedSave();updateHeaderTeaName();renderLibrary();}));
@@ -2884,7 +2974,7 @@ function init(){
   el('teaAmountTsp').addEventListener('input',()=>{clearTimeout(_undoPushT.tsp);_undoPushT.tsp=setTimeout(()=>pushUndo(),1500);schedSave();updateMeasureRow();updateDirtyState();});
   el('vesselMl').addEventListener('input',()=>{clearTimeout(_undoPushT.vessel);_undoPushT.vessel=setTimeout(()=>pushUndo(),1500);updatePer100();renderLibrary();renderLog();});
   el('vesselType').addEventListener('input',()=>{clearTimeout(_undoPushT.vtype);_undoPushT.vtype=setTimeout(()=>pushUndo(),1500);schedSave();renderLibrary();});
-  el('tempRange').addEventListener('input',()=>{pushUndo();schedSave();updateDirtyState();renderSteeps();});
+  el('tempRange').addEventListener('input',()=>{pushUndo();schedSave();updateDirtyState();updateCoolGuide();renderSteeps();});
   el('rinseSec').addEventListener('change',()=>{pushUndo();schedSave();renderLibrary();});
   el('rinseTemp').addEventListener('change',()=>{pushUndo();renderSteeps();schedSave();renderLibrary();});
 }
