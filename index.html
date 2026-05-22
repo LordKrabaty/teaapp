@@ -989,6 +989,12 @@ function updateCoolGuide(){
     pc.classList.add('visible');
     const chips=pc.querySelectorAll('.pour-chip');
     const curves=[COOL_CURVE,COOL_CURVE_1,COOL_CURVE_2];
+    if(coolPours>0&&coolWaitSecCurve(temp,curves[coolPours])===null){
+      coolPours=0;
+      if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
+      const r0=coolWaitSecPoured(temp,0);
+      coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};
+    }
     chips.forEach((btn,i)=>{
       btn.classList.toggle('active',i===coolPours);
       const ok=i===0||coolWaitSecCurve(temp,curves[i])!==null;
@@ -1211,7 +1217,7 @@ function applySessionData(st){
   steeps=[];nextId=st.nextId||1;
   if(st.steeps?.length)st.steeps.forEach(s=>steeps.push({id:s.id,sec:s.sec,temp:s.temp||'',remaining:s.sec,state:'idle'}));
   rinseState={remaining:parseInt(el('rinseSec').value)||15,state:'idle'};
-  coolPours=st.coolPours||0;
+  coolPours=el('chkThermometer').classList.contains('checked')?0:(st.coolPours||0);
   renderSteeps();updateHeaderTeaName();updatePer100();updateCoolGuide();
 }
 
@@ -1648,6 +1654,7 @@ function toggleRinseTimer(){
 }
 
 function setCoolPours(n){
+  pushUndo();
   coolPours=n;
   if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
   const csecRaw=coolWaitSecPoured(el('tempRange').value,coolPours);
@@ -1655,6 +1662,7 @@ function setCoolPours(n){
   coolState={remaining:csec,state:'idle'};
   updateCoolGuide();
   renderSteeps();
+  schedSave();renderLibrary();
 }
 function resetCoolTimer(){
   if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
@@ -1665,7 +1673,7 @@ function resetCoolTimer(){
 function toggleCoolTimer(){
   const csecRaw=coolWaitSecPoured(el('tempRange').value,coolPours);
   const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;if(!csec)return;
-  if(coolState.state==='done'){coolPours=0;const r0=coolWaitSec(el('tempRange').value);coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};if(coolTimer){clearInterval(coolTimer);coolTimer=null;}renderSteeps();return;}
+  if(coolState.state==='done'){const r0=coolWaitSecPoured(el('tempRange').value,coolPours);coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};if(coolTimer){clearInterval(coolTimer);coolTimer=null;}renderSteeps();return;}
   if(coolState.state==='running'){clearInterval(coolTimer);coolTimer=null;coolState.state='paused';renderSteeps();return;}
   coolState.state='running';renderSteeps();
   coolTimer=setInterval(()=>{
@@ -1719,6 +1727,7 @@ async function newSession(){
   el('notes').value='';
   el('rinseSec').value='15';el('rinseTemp').value='';
   ['chkWarm','chkRinse','chkSieve','chkCover','chkThermometer'].forEach(id=>el(id).classList.remove('checked'));
+  el('chkThermometer').classList.add('checked');
   warmDone=false;measureDone=false;
   if(coolTimer){clearInterval(coolTimer);coolTimer=null;}coolState={remaining:0,state:'idle'};
   updateRinseVisibility();
@@ -1787,6 +1796,7 @@ function initFs(){
 let _confirmResolve=null;
 function customConfirm(msg, okLabel='potvrdit'){
   return new Promise(resolve=>{
+    if(_confirmResolve){const old=_confirmResolve;_confirmResolve=null;old(false);}
     el('confirmMsg').textContent=msg;
     el('confirmOkBtn').textContent=okLabel;
     el('confirmCancelBtn').style.display='';
@@ -1800,6 +1810,7 @@ function customConfirm(msg, okLabel='potvrdit'){
 }
 function customAlert(msg, okLabel='ok'){
   return new Promise(resolve=>{
+    if(_confirmResolve){const old=_confirmResolve;_confirmResolve=null;old(false);}
     el('confirmMsg').textContent=msg;
     el('confirmOkBtn').textContent=okLabel;
     el('confirmCancelBtn').style.display='none';
@@ -1816,6 +1827,7 @@ function customAlert(msg, okLabel='ok'){
 let _libDelResolve=null;
 function customDeleteOrArchive(name){
   return new Promise(resolve=>{
+    if(_libDelResolve){const old=_libDelResolve;_libDelResolve=null;old(null);}
     el('libDelMsg').textContent='Co chceš udělat s "'+name+'"?';
     el('libDelModal').classList.add('open');
     _libDelResolve=(val)=>{
@@ -1865,7 +1877,7 @@ function updateAppGrid(){
   } else if(w<=1020){
     app.style.gridTemplateColumns=hidden?'0 1fr':'185px 1fr';
   } else {
-    app.style.gridTemplateColumns=hidden?'0 1fr 265px':'210px 1fr 265px';
+    app.style.gridTemplateColumns=hidden?'0 1fr 330px':'210px 1fr 330px';
   }
 }
 /* ── DARK MODE ─── */
@@ -2018,7 +2030,7 @@ function openImportModal(){
 function parseImportJson(text){
   try{
     const parsed=JSON.parse(text);
-    if(!parsed.teas&&!parsed.templates)throw new Error('Neplatný formát — chybí teas nebo templates');
+    if(!parsed.teas&&!parsed.templates&&!parsed.archive)throw new Error('Neplatný formát — chybí teas, templates ani archive');
     // Teas
     const existingTeaNames=new Map(library.map(x=>[x.name.trim().toLowerCase(),x.id]));
     const existingTeaById=new Map(library.map(x=>[x.id,x]));
@@ -2408,6 +2420,7 @@ function detectTeaDuplicate(t,existingTeaById,existingTeaNames){
 function genUniqueId(existingIds){
   let id;
   do{id=Date.now()+Math.floor(Math.random()*100000);}while(existingIds.has(id));
+  existingIds.add(id);
   return id;
 }
 function doImport(){
@@ -2520,6 +2533,7 @@ function getTemplateData(){
 }
 
 function openTplNameModal(){
+  pendingLogTplData=null;
   const auto=el('teaName').value.trim();
   el('tplNameInput').value=auto?'Gongfu — '+auto:'';
   el('tplNameModal').classList.add('open');
@@ -2760,25 +2774,7 @@ function saveLog(){saveLibrary();}
 
 function buildSetupSnapshot(){
   const name=el('teaName').value.trim()||'—';
-  const amount=el('teaAmount').value;
-  const amountTsp=el('teaAmountTsp').value;
-  const amtStr=[amount?amount+'g':'',amountTsp?amountTsp+' lžičky':''].filter(Boolean).join(' / ');
-  const vessel=el('vesselMl').value||'50';
-  const vesselType=el('vesselType').value||'gaiwan';
-  const temp=el('tempRange').value;
-  const checkLabels={chkWarm:'nahřát',chkRinse:'oplach',chkSieve:'sítko',chkCover:'přikrytí',chkThermometer:'teploměr'};
-  const checkLine=Object.entries(checkLabels)
-    .map(([id,l])=>(el(id).classList.contains('checked')?'✓ ':'✗ ')+l).join('  ');
-  const rinseOn=el('chkRinse').classList.contains('checked');
-  const noTherm=!el('chkThermometer').classList.contains('checked');
-  const lines=[];
-  lines.push(name+(amtStr?' · '+amtStr:'')+(vessel?' · '+vesselType+' '+vessel+' ml':''));
-  lines.push('teplota: '+temp+' °C');
-  lines.push(checkLine);
-  if(rinseOn){lines.push('  oplach: '+(el('rinseSec').value||'15')+' s'+(el('rinseTemp').value?' / '+el('rinseTemp').value+' °C':''));}
-  if(noTherm&&coolPours>0){const pourNames=['konvice','džbánek','2. nádoba'];lines.push('  chlazení: '+pourNames[coolPours]);}
-  steeps.forEach((s,i)=>lines.push((i+1)+'. nálev: '+s.sec+'s'+(s.temp?' / '+s.temp+'°C':'')));
-  return lines.join('\n');
+  return buildSetupFromData(getTemplateData(),name);
 }
 
 function fmtDate(d){
@@ -3122,7 +3118,7 @@ function init(){
   if(!restored)defaultSteeps.forEach(s=>addSteep(s,'',true));
   if(activeLibId)markSaved();
   renderSteeps();updateHeaderTeaName();updatePer100();updateCoolGuide();
-  showSave(restored?'↓ obnoveno':'');
+  if(restored)showSave('↓ obnoveno');
   let _undoPushT={};
   ['teaName','notes'].forEach(id=>el(id).addEventListener('input',()=>{clearTimeout(_undoPushT[id]);_undoPushT[id]=setTimeout(()=>{pushUndo();},1500);schedSave();updateHeaderTeaName();renderLibrary();}));
   el('teaCategory').addEventListener('change',()=>{pushUndo();schedSave();renderLibrary();});
@@ -3132,12 +3128,11 @@ function init(){
   el('teaAmountTsp').addEventListener('input',()=>{clearTimeout(_undoPushT.tsp);_undoPushT.tsp=setTimeout(()=>pushUndo(),1500);schedSave();updateMeasureRow();updateDirtyState();});
   el('vesselMl').addEventListener('input',()=>{clearTimeout(_undoPushT.vessel);_undoPushT.vessel=setTimeout(()=>pushUndo(),1500);updatePer100();renderLibrary();renderLog();});
   el('vesselType').addEventListener('input',()=>{clearTimeout(_undoPushT.vtype);_undoPushT.vtype=setTimeout(()=>pushUndo(),1500);schedSave();renderLibrary();});
-  el('tempRange').addEventListener('input',()=>{pushUndo();schedSave();updateDirtyState();updateCoolGuide();renderSteeps();});
+  el('tempRange').addEventListener('input',()=>{clearTimeout(_undoPushT.temp);_undoPushT.temp=setTimeout(()=>pushUndo(),1500);schedSave();updateDirtyState();updateCoolGuide();renderSteeps();});
   el('rinseSec').addEventListener('change',()=>{pushUndo();schedSave();renderLibrary();});
   el('rinseTemp').addEventListener('change',()=>{pushUndo();renderSteeps();schedSave();renderLibrary();});
 }
 init();
-if(window.checkCloudOnStartup) window.checkCloudOnStartup();
 window.addEventListener('resize',updateAppGrid);
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.key==='z'&&e.shiftKey))){
@@ -3410,6 +3405,7 @@ document.addEventListener('keydown',e=>{
   window.doCloudUpload=doCloudUpload;
   window.syncDownload=syncDownload;
   window.checkCloudOnStartup=checkCloudOnStartup;
+  checkCloudOnStartup();
 })();
 </script>
 </body>
