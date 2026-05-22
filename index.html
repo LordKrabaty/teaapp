@@ -908,7 +908,7 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
   <div class="card" id="panel-steeps">
     <div class="steeps-header">
       <div class="card-controls"><div class="pfs-ctrl"><button class="pfs-btn" onclick="changePanelFs('panel-steeps',-1)" title="zmenšit písmo sekce">−</button><span class="pfs-val" id="pfs-panel-steeps">100%</span><button class="pfs-btn" onclick="changePanelFs('panel-steeps',1)" title="zvětšit písmo sekce">+</button></div><button class="expand-btn" onclick="toggleExpand('panel-steeps')" title="celá obrazovka"><svg viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button></div>
-      <div class="card-title" style="margin-bottom:0"><span class="card-title-text" title="nálevy"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span><button class="btn-add" onclick="addSteep()">+</button></div>
+      <div class="card-title" style="margin-bottom:0"><span class="card-title-text" title="nálevy"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span><button class="btn-add" onclick="resetAllSteeps()" title="restartovat vše">↺</button><button class="btn-add" onclick="addSteep()">+</button></div>
     </div>
     <div class="steep-list" id="steepList"></div>
   </div>
@@ -1571,7 +1571,7 @@ function renderSteeps(){
       <div class="steep-temp-input" style="text-align:center;font-family:'DM Mono',monospace;font-size:.82rem;color:var(--muted);border-color:transparent;background:transparent">${isNaN(parseInt(gTemp))?'—':gTemp}</div>
       <div class="timer-display ${coolState.state==='running'?'running':coolState.state==='done'?'done-time':''}" id="timer-cool">${isDisabled?'–':fmtTime(coolState.remaining)}</div>
       <button class="btn-play ${coolState.state==='running'?'is-running':coolState.state==='done'?'is-done':''}" onclick="toggleCoolTimer()" ${isDisabled?'disabled':''}>${isDisabled?'–':icon}</button>
-      <div></div>
+      ${coolState.state!=='idle'?`<button class="btn-del" onclick="resetCoolTimer()" title="restart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.1L1 10"/></svg></button>`:'<div></div>'}
       <div class="progress-bar-wrap ${coolState.state!=='idle'?'visible':''}" id="prog-wrap-cool">
         <div class="progress-bar" id="prog-cool" style="width:${pct}%"></div>
       </div>`;
@@ -1619,9 +1619,9 @@ function renderSteeps(){
       <input class="steep-temp-input" type="number" min="40" max="100" step="5" value="${s.temp}" placeholder="${gTemp||' '}" onchange="updateSteepTemp(${s.id},this.value)" />
       <div class="timer-display ${s.state==='running'?'running':s.state==='done'?'done-time':''}" id="timer-${s.id}">${fmtTime(s.remaining)}</div>
       <button class="btn-play ${s.state==='running'?'is-running':s.state==='done'?'is-done':''}" onclick="toggleTimer(${s.id})">${icon}</button>
-      <button class="btn-del" onclick="removeSteep(${s.id})">
-        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      ${s.state==='idle'
+        ?`<button class="btn-del" onclick="removeSteep(${s.id})"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`
+        :`<button class="btn-del" onclick="resetSteep(${s.id})" title="restart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.1L1 10"/></svg></button>`}
       <div class="progress-bar-wrap ${s.state!=='idle'?'visible':''}" id="prog-wrap-${s.id}">
         <div class="progress-bar" id="prog-${s.id}" style="width:${pct}%"></div>
       </div>`;
@@ -1654,6 +1654,12 @@ function setCoolPours(n){
   const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;
   coolState={remaining:csec,state:'idle'};
   updateCoolGuide();
+  renderSteeps();
+}
+function resetCoolTimer(){
+  if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
+  const r0=coolWaitSecPoured(el('tempRange').value,coolPours);
+  coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};
   renderSteeps();
 }
 function toggleCoolTimer(){
@@ -1691,6 +1697,17 @@ function updateSteepTime(id,val){pushUndo();const s=steeps.find(x=>x.id===id);if
 function updateSteepTemp(id,val){pushUndo();const s=steeps.find(x=>x.id===id);if(!s)return;s.temp=val?Math.max(40,Math.min(100,parseInt(val)||0)).toString():'';renderSteeps();schedSave();renderLibrary();}
 function updateRinseTime(val){pushUndo();const n=Math.max(3,Math.min(120,parseInt(val)||15));el('rinseSec').value=n;if(rinseState.state==='idle')rinseState.remaining=n;renderSteeps();schedSave();renderLibrary();}
 function removeSteep(id){pushUndo();clearInterval(timers[id]);delete timers[id];steeps=steeps.filter(s=>s.id!==id);renderSteeps();schedSave();renderLibrary();}
+function resetSteep(id){const s=steeps.find(x=>x.id===id);if(!s)return;clearInterval(timers[id]);delete timers[id];s.state='idle';s.remaining=s.sec;renderSteeps();}
+function resetAllSteeps(){
+  steeps.forEach(s=>{clearInterval(timers[s.id]);delete timers[s.id];s.state='idle';s.remaining=s.sec;});
+  if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
+  const r0=coolWaitSecPoured(el('tempRange').value,coolPours);
+  coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};
+  if(rinseTimer){clearInterval(rinseTimer);rinseTimer=null;}
+  rinseState={remaining:parseInt(el('rinseSec').value)||15,state:'idle'};
+  warmDone=false;measureDone=false;
+  renderSteeps();
+}
 function clearAllTimers(){Object.values(timers).forEach(t=>clearInterval(t));timers={};if(rinseTimer){clearInterval(rinseTimer);rinseTimer=null;}if(coolTimer){clearInterval(coolTimer);coolTimer=null;}}
 async function newSession(){
   if(!await customConfirm('Otevřít prázdnou kartu? Neuložené změny budou ztraceny.','otevřít'))return;
