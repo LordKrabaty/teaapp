@@ -184,6 +184,14 @@ input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:non
 .check-mark{width:9px;height:6px;border-left:2px solid var(--black);border-bottom:2px solid var(--black);transform:rotate(-45deg) translateY(-1px);opacity:0}
 .check-item.checked .check-mark{opacity:1}
 
+/* POUR CONTROL */
+.pour-chips{display:none;margin-top:.4rem;gap:.28rem;align-items:center;flex-wrap:wrap}
+.pour-chips.visible{display:flex}
+.pour-chip{font-size:.73rem;padding:.22rem .55rem;border:var(--bh);border-radius:var(--r);background:var(--w);color:var(--dark);cursor:pointer}
+.pour-chip:active{background:var(--off)}
+@media(hover:hover){.pour-chip:hover:not(.active){background:var(--off)}}
+.pour-chip.active{background:var(--black);color:var(--w);border-color:var(--black)}
+.pour-chip:disabled{opacity:.3;cursor:default}
 /* RINSE SETTINGS */
 .rinse-settings{display:none;margin-top:.7rem;padding:.65rem .85rem;background:var(--off);border:var(--b);border-radius:var(--r);gap:.75rem;align-items:center;flex-wrap:wrap}
 .rinse-settings.visible{display:flex}
@@ -765,7 +773,7 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
           <label class="le-chk"><input type="checkbox" id="le-chkRinse" onchange="updateLeRinseRow()" /> oplach</label>
           <label class="le-chk"><input type="checkbox" id="le-chkSieve" /> sítko</label>
           <label class="le-chk"><input type="checkbox" id="le-chkCover" /> přikrýt</label>
-          <label class="le-chk"><input type="checkbox" id="le-chkThermometer" /> teploměr</label>
+          <label class="le-chk"><input type="checkbox" id="le-chkThermometer" onchange="updateLeCoolRow()" /> teploměr</label>
         </div>
       </div>
       <div id="le-rinse-row" style="display:none;gap:.35rem;align-items:center;flex-wrap:wrap">
@@ -774,6 +782,12 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
         <span class="le-unit">s</span>
         <input class="le-inp" type="number" id="le-rtemp" min="40" max="100" step="5" placeholder=" " style="width:52px" />
         <span class="le-unit">°C</span>
+      </div>
+      <div id="le-cool-row" style="display:none;gap:.28rem;align-items:center;flex-wrap:wrap">
+        <span style="font-size:.78rem;color:var(--muted);min-width:48px">chlazení</span>
+        <button class="pour-chip" onclick="setLeCoolPours(0)">konvice</button>
+        <button class="pour-chip" onclick="setLeCoolPours(1)">1× džbánek</button>
+        <button class="pour-chip" onclick="setLeCoolPours(2)">2× nádoba</button>
       </div>
       <div class="field">
         <label>nálevy</label>
@@ -850,6 +864,12 @@ html.dark .btn-log{background:var(--black);color:var(--w)}
             <span style="font-size:.8rem;color:var(--muted);font-weight:500">°C</span>
           </div>
           <span id="coolGuide" style="font-size:.75rem;color:var(--muted);font-family:'DM Mono',monospace;display:none"></span>
+        </div>
+        <div class="pour-chips" id="pourControl">
+          <span style="font-size:.73rem;color:var(--muted)">přelití:</span>
+          <button class="pour-chip" onclick="setCoolPours(0)">konvice</button>
+          <button class="pour-chip" onclick="setCoolPours(1)">1× džbánek</button>
+          <button class="pour-chip" onclick="setCoolPours(2)">2× nádoba</button>
         </div>
       </div>
     </div>
@@ -931,30 +951,50 @@ let steeps=[],timers={},nextId=1;
 let warmDone=false,measureDone=false;
 let rinseTimer=null,rinseState={remaining:15,state:'idle'};
 let coolTimer=null,coolState={remaining:0,state:'idle'};
-const COOL_CURVE=[{sec:0,temp:100},{sec:60,temp:90},{sec:180,temp:85},{sec:300,temp:80},{sec:600,temp:70},{sec:900,temp:60}];
-function coolWaitSec(targetTemp){
+let coolPours=0;
+const COOL_CURVE=[{sec:0,temp:100},{sec:60,temp:95},{sec:180,temp:90},{sec:360,temp:85},{sec:540,temp:80},{sec:780,temp:75},{sec:1020,temp:70},{sec:1320,temp:65},{sec:1740,temp:60}];
+const COOL_CURVE_1=[{sec:0,temp:95},{sec:60,temp:90},{sec:105,temp:85},{sec:180,temp:80},{sec:300,temp:75},{sec:420,temp:70},{sec:540,temp:65},{sec:720,temp:60}];
+const COOL_CURVE_2=[{sec:0,temp:85},{sec:45,temp:80},{sec:120,temp:75},{sec:210,temp:70},{sec:330,temp:65},{sec:480,temp:60}];
+function coolWaitSecCurve(targetTemp,curve){
   const raw=parseInt(targetTemp);
-  if(isNaN(raw)||raw<=0)return null;   // neplatná teplota
-  if(raw>100)return 0;                 // ihned (nad bodem varu)
-  if(raw>=100)return 0;
-  if(raw<60)return -1;                 // pod rozsahem tabulky
-  for(let i=0;i<COOL_CURVE.length-1;i++){
-    const hi=COOL_CURVE[i],lo=COOL_CURVE[i+1];
+  if(isNaN(raw)||raw<=0)return null;
+  if(raw>curve[0].temp)return curve===COOL_CURVE?0:null;
+  if(raw>=curve[0].temp)return 0;
+  if(raw<curve[curve.length-1].temp)return -1;
+  for(let i=0;i<curve.length-1;i++){
+    const hi=curve[i],lo=curve[i+1];
     if(raw<=hi.temp&&raw>=lo.temp){const frac=(hi.temp-raw)/(hi.temp-lo.temp);return Math.round(hi.sec+frac*(lo.sec-hi.sec));}
   }
   return 0;
 }
+function coolWaitSec(t){return coolWaitSecCurve(t,COOL_CURVE);}
+function coolWaitSecPoured(t,p){return coolWaitSecCurve(t,p===2?COOL_CURVE_2:p===1?COOL_CURVE_1:COOL_CURVE);}
 function updateCoolGuide(){
   const noTherm=!el('chkThermometer').classList.contains('checked');
-  const guide=el('coolGuide');
+  const guide=el('coolGuide');const pc=el('pourControl');
   if(!guide)return;
-  if(!noTherm){guide.style.display='none';return;}
-  const sec=coolWaitSec(el('tempRange').value);
-  guide.style.display='';
-  if(sec===null){guide.textContent='⚠ neplatná teplota';guide.style.color='#c0392b';}
-  else if(sec===-1){guide.textContent='→ čekat déle než 15 min';guide.style.color='';}
-  else if(sec===0){guide.textContent='použít ihned';guide.style.color='';}
-  else{guide.textContent='→ čekat ~'+Math.round(sec/60)+' min';guide.style.color='';}
+  if(!noTherm){guide.style.display='none';if(pc)pc.classList.remove('visible');return;}
+  const temp=el('tempRange').value;
+  const fmtG=s=>{if(s<0)return'>30 min';if(s===0)return'ihned';return s<60?s+'s':Math.round(s/60)+' min';};
+  const s0=coolWaitSec(temp);
+  if(s0===null){guide.style.display='';guide.textContent='⚠ neplatná teplota';guide.style.color='#c0392b';if(pc)pc.classList.remove('visible');return;}
+  guide.style.color='';guide.style.display='';
+  const s1=coolWaitSecCurve(temp,COOL_CURVE_1);
+  const s2=coolWaitSecCurve(temp,COOL_CURVE_2);
+  const parts=['→ '+fmtG(s0)];
+  if(s1!==null)parts.push('1× '+fmtG(s1));
+  if(s2!==null)parts.push('2× '+fmtG(s2));
+  guide.textContent=parts.join(' · ');
+  if(pc){
+    pc.classList.add('visible');
+    const chips=pc.querySelectorAll('.pour-chip');
+    const curves=[COOL_CURVE,COOL_CURVE_1,COOL_CURVE_2];
+    chips.forEach((btn,i)=>{
+      btn.classList.toggle('active',i===coolPours);
+      const ok=i===0||coolWaitSecCurve(temp,curves[i])!==null;
+      btn.disabled=!ok;
+    });
+  }
 }
 let library=[],activeLibId=null;
 let archive=[],archiveOpen=false;
@@ -1151,6 +1191,7 @@ function getSessionData(){
       chkThermometer:el('chkThermometer').classList.contains('checked'),
     },
     rinseSec:el('rinseSec').value,rinseTemp:el('rinseTemp').value,
+    coolPours,
     steeps:steeps.map(s=>({id:s.id,sec:s.sec,temp:s.temp})),nextId,
   };
 }
@@ -1170,7 +1211,8 @@ function applySessionData(st){
   steeps=[];nextId=st.nextId||1;
   if(st.steeps?.length)st.steeps.forEach(s=>steeps.push({id:s.id,sec:s.sec,temp:s.temp||'',remaining:s.sec,state:'idle'}));
   rinseState={remaining:parseInt(el('rinseSec').value)||15,state:'idle'};
-  renderSteeps();updateHeaderTeaName();updatePer100();
+  coolPours=st.coolPours||0;
+  renderSteeps();updateHeaderTeaName();updatePer100();updateCoolGuide();
 }
 
 function saveSession(){try{localStorage.setItem(SESSION_KEY,JSON.stringify({...getSessionData(),activeLibId}));}catch(e){}}
@@ -1187,7 +1229,7 @@ function saveArchive(){try{localStorage.setItem(ARCHIVE_KEY,JSON.stringify(archi
 function entryData(){
   const d=getSessionData();
   const activeEntry=library.find(e=>e.id===activeLibId);
-  return{teaName:d.teaName,teaCategory:d.teaCategory,seller:d.seller,location:d.location,teaAmount:d.teaAmount,teaAmountTsp:d.teaAmountTsp,vesselType:d.vesselType,vesselMl:d.vesselMl,temp:d.temp,notes:d.notes,checks:d.checks,rinseSec:d.rinseSec,rinseTemp:d.rinseTemp,steeps:d.steeps.map(s=>({sec:s.sec,temp:s.temp}))};
+  return{teaName:d.teaName,teaCategory:d.teaCategory,seller:d.seller,location:d.location,teaAmount:d.teaAmount,teaAmountTsp:d.teaAmountTsp,vesselType:d.vesselType,vesselMl:d.vesselMl,temp:d.temp,notes:d.notes,checks:d.checks,rinseSec:d.rinseSec,rinseTemp:d.rinseTemp,coolPours:d.coolPours||0,steeps:d.steeps.map(s=>({sec:s.sec,temp:s.temp}))};
 }
 
 function saveToLibrary(){
@@ -1207,7 +1249,7 @@ function updateLibraryEntry(){
 
 function loadFromLibrary(id){
   const entry=library.find(e=>e.id===id);if(!entry)return;
-  activeLibId=id;clearAllTimers();warmDone=false;measureDone=false;
+  activeLibId=id;clearAllTimers();warmDone=false;measureDone=false;coolPours=0;
   const d=entry.data;nextId=1;
   const sw=d.steeps.map((s,i)=>({...s,id:i+1,remaining:s.sec,state:'idle'}));
   nextId=sw.length+1;
@@ -1505,13 +1547,15 @@ function renderSteeps(){
     list.appendChild(mRow);
   }
   if(noTherm){
-    const csecRaw=coolWaitSec(gTemp);
+    const csecRaw=coolWaitSecPoured(gTemp,coolPours);
     const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;
     if(coolState.state==='idle')coolState.remaining=csec;
     const isDisabled=!csec;
     const pct=(!isDisabled&&coolState.state!=='idle')?Math.round((1-coolState.remaining/csec)*100):0;
-    const timeLabel=csecRaw===null?'—':csecRaw===-1?'> 15 min':csecRaw===0?'ihned':Math.round(csecRaw/60)+' min';
-    const rowLabel=csecRaw===null?'⚠ neplatná teplota':csecRaw===-1?'čekat déle než 15 min':'ochlazení';
+    const fmtSec=s=>{if(s===null)return'—';if(s<0)return'>30 min';if(s===0)return'ihned';return s<60?s+'s':Math.round(s/60)+' min';};
+    const timeLabel=fmtSec(csecRaw);
+    const pourNames=['konvice','džbánek','2. nádoba'];
+    const rowLabel=csecRaw===null?'⚠ nedosažitelné':'ochlazení · '+pourNames[coolPours];
     const rowColor=csecRaw===null?'color:#c0392b':'';
     const icon=coolState.state==='running'
       ?`<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`
@@ -1603,10 +1647,19 @@ function toggleRinseTimer(){
   },1000);
 }
 
+function setCoolPours(n){
+  coolPours=n;
+  if(coolTimer){clearInterval(coolTimer);coolTimer=null;}
+  const csecRaw=coolWaitSecPoured(el('tempRange').value,coolPours);
+  const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;
+  coolState={remaining:csec,state:'idle'};
+  updateCoolGuide();
+  renderSteeps();
+}
 function toggleCoolTimer(){
-  const csecRaw=coolWaitSec(el('tempRange').value);
+  const csecRaw=coolWaitSecPoured(el('tempRange').value,coolPours);
   const csec=(csecRaw!==null&&csecRaw>0)?csecRaw:0;if(!csec)return;
-  if(coolState.state==='done'){coolState={remaining:csec,state:'idle'};if(coolTimer){clearInterval(coolTimer);coolTimer=null;}renderSteeps();return;}
+  if(coolState.state==='done'){coolPours=0;const r0=coolWaitSec(el('tempRange').value);coolState={remaining:(r0!==null&&r0>0)?r0:0,state:'idle'};if(coolTimer){clearInterval(coolTimer);coolTimer=null;}renderSteeps();return;}
   if(coolState.state==='running'){clearInterval(coolTimer);coolTimer=null;coolState.state='paused';renderSteeps();return;}
   coolState.state='running';renderSteeps();
   coolTimer=setInterval(()=>{
@@ -1642,7 +1695,7 @@ function clearAllTimers(){Object.values(timers).forEach(t=>clearInterval(t));tim
 async function newSession(){
   if(!await customConfirm('Otevřít prázdnou kartu? Neuložené změny budou ztraceny.','otevřít'))return;
   clearAllTimers();
-  steeps=[];nextId=1;activeLibId=null;
+  steeps=[];nextId=1;activeLibId=null;coolPours=0;
   el('teaName').value='';el('teaCategory').value='';el('teaSeller').value='';el('teaLocation').value='';el('teaAmount').value='';el('teaAmountTsp').value='';
   el('vesselMl').value='50';el('vesselType').value='gaiwan';
   el('tempRange').value='80';
@@ -2437,6 +2490,7 @@ function getTemplateData(){
     vesselType:el('vesselType').value||'gaiwan',
     rinseSec:el('rinseSec').value||'15',
     rinseTemp:el('rinseTemp').value||'',
+    coolPours,
     checks:{
       chkWarm:el('chkWarm').classList.contains('checked'),
       chkRinse:el('chkRinse').classList.contains('checked'),
@@ -2699,11 +2753,13 @@ function buildSetupSnapshot(){
   const checkLine=Object.entries(checkLabels)
     .map(([id,l])=>(el(id).classList.contains('checked')?'✓ ':'✗ ')+l).join('  ');
   const rinseOn=el('chkRinse').classList.contains('checked');
+  const noTherm=!el('chkThermometer').classList.contains('checked');
   const lines=[];
   lines.push(name+(amtStr?' · '+amtStr:'')+(vessel?' · '+vesselType+' '+vessel+' ml':''));
   lines.push('teplota: '+temp+' °C');
   lines.push(checkLine);
   if(rinseOn){lines.push('  oplach: '+(el('rinseSec').value||'15')+' s'+(el('rinseTemp').value?' / '+el('rinseTemp').value+' °C':''));}
+  if(noTherm&&coolPours>0){const pourNames=['konvice','džbánek','2. nádoba'];lines.push('  chlazení: '+pourNames[coolPours]);}
   steeps.forEach((s,i)=>lines.push((i+1)+'. nálev: '+s.sec+'s'+(s.temp?' / '+s.temp+'°C':'')));
   return lines.join('\n');
 }
@@ -2743,6 +2799,7 @@ function updateLogText(id,val){
 let editingLogId=null;
 let editingTplId=null;
 let leEditSteeps=[];
+let leEditCoolPours=0;
 
 function openLogEdit(logId){
   const logs=getActiveLogs();if(!logs)return;
@@ -2763,15 +2820,23 @@ function openLogEdit(logId){
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
   el('le-chkThermometer').checked='chkThermometer' in ch?!!ch.chkThermometer:true;
+  leEditCoolPours=d.coolPours||0;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
-  updateLeRinseRow();
+  updateLeRinseRow();updateLeCoolRow();
   el('logEditModal').classList.add('open');
 }
 
 function updateLeRinseRow(){
   el('le-rinse-row').style.display=el('le-chkRinse').checked?'flex':'none';
 }
+function updateLeCoolRow(){
+  const noTherm=!el('le-chkThermometer').checked;
+  const row=el('le-cool-row');if(!row)return;
+  row.style.display=noTherm?'flex':'none';
+  if(noTherm)row.querySelectorAll('.pour-chip').forEach((btn,i)=>btn.classList.toggle('active',i===leEditCoolPours));
+}
+function setLeCoolPours(n){leEditCoolPours=n;updateLeCoolRow();}
 
 function renderLeEditSteeps(){
   el('le-steeps-body').innerHTML=leEditSteeps.map((s,i)=>`
@@ -2822,9 +2887,10 @@ function openTplEdit(id){
   el('le-chkSieve').checked=!!ch.chkSieve;
   el('le-chkCover').checked=!!ch.chkCover;
   el('le-chkThermometer').checked='chkThermometer' in ch?!!ch.chkThermometer:true;
+  leEditCoolPours=d.coolPours||0;
   leEditSteeps=(d.steeps||[]).map(s=>({sec:s.sec,temp:s.temp||''}));
   renderLeEditSteeps();
-  updateLeRinseRow();
+  updateLeRinseRow();updateLeCoolRow();
   el('leModalTitle').textContent='Parametry šablony — '+tpl.name;
   el('logEditModal').classList.add('open');
 }
@@ -2846,6 +2912,7 @@ function saveTplEdit(){
   d.rinseSec=el('le-rsec').value||'15';
   d.rinseTemp=el('le-rtemp').value||'';
   d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked,chkThermometer:el('le-chkThermometer').checked};
+  d.coolPours=el('le-chkThermometer').checked?0:leEditCoolPours;
   d.steeps=leEditSteeps.map(s=>({sec:s.sec,temp:s.temp}));
   tpl.data=d;
   editingTplId=null;
@@ -2915,6 +2982,7 @@ function buildSetupFromData(d,name){
   lines.push('teplota: '+temp+' °C');
   lines.push(checkLine);
   if(checks.chkRinse){lines.push('  oplach: '+(d.rinseSec||'15')+' s'+(d.rinseTemp?' / '+d.rinseTemp+' °C':''));}
+  if(!checks.chkThermometer&&d.coolPours>0){const pourNames=['konvice','džbánek','2. nádoba'];lines.push('  chlazení: '+pourNames[d.coolPours]);}
   (d.steeps||[]).forEach((s,i)=>lines.push((i+1)+'. nálev: '+s.sec+'s'+(s.temp?' / '+s.temp+'°C':'')));
   return lines.join('\n');
 }
@@ -2932,6 +3000,7 @@ function saveLogEdit(){
   d.rinseSec=el('le-rsec').value||'15';
   d.rinseTemp=el('le-rtemp').value||'';
   d.checks={chkWarm:el('le-chkWarm').checked,chkRinse:el('le-chkRinse').checked,chkSieve:el('le-chkSieve').checked,chkCover:el('le-chkCover').checked,chkThermometer:el('le-chkThermometer').checked};
+  d.coolPours=el('le-chkThermometer').checked?0:leEditCoolPours;
   d.steeps=leEditSteeps.map(s=>({sec:s.sec,temp:s.temp}));
   e.data=d;
   const teaName=(e.setup||'').split('\n')[0].split(' · ')[0];
@@ -2950,11 +3019,12 @@ function applyLogEntryData(d){
   el('rinseSec').value=d.rinseSec||15;
   el('rinseTemp').value=d.rinseTemp||'';
   if(d.checks)Object.entries(d.checks).forEach(([cid,on])=>el(cid).classList.toggle('checked',!!on));
+  coolPours=d.checks&&!d.checks.chkThermometer?(d.coolPours||0):0;
   updateRinseVisibility();
   clearAllTimers();steeps=[];nextId=1;
   (d.steeps||[]).forEach(s=>addSteep(s.sec,s.temp||'',true));
   rinseState={remaining:parseInt(el('rinseSec').value)||15,state:'idle'};
-  renderSteeps();schedSave();renderLibrary();
+  renderSteeps();schedSave();renderLibrary();updateCoolGuide();
 }
 
 async function activateLogEntry(logId){
